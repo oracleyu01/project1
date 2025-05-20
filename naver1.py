@@ -85,7 +85,7 @@ def init_db():
     )
     ''')
    
-    # 분석 결과 테이블 생성
+    # 분석 결과 테이블 생성 - 분석된 리뷰 수 필드 추가
     c.execute('''
     CREATE TABLE IF NOT EXISTS analysis_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,6 +93,7 @@ def init_db():
         positive_opinions TEXT,
         negative_opinions TEXT,
         summary TEXT,
+        analyzed_count INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
@@ -144,34 +145,34 @@ def get_blog_posts(cursor, product_name, limit=50):
    
     return cursor.fetchall()
 
-# 분석 결과를 데이터베이스에 저장
-def save_analysis_result(conn, cursor, product_name, positive, negative, summary):
+# 분석 결과를 데이터베이스에 저장 - 분석된 리뷰 수 저장 추가
+def save_analysis_result(conn, cursor, product_name, positive, negative, summary, analyzed_count):
     # 기존 분석 삭제 (같은 제품명인 경우)
     cursor.execute("DELETE FROM analysis_results WHERE product_name = ?", (product_name,))
    
     # 새 분석 결과 저장
     cursor.execute('''
-    INSERT INTO analysis_results (product_name, positive_opinions, negative_opinions, summary)
-    VALUES (?, ?, ?, ?)
-    ''', (product_name, positive, negative, summary))
+    INSERT INTO analysis_results (product_name, positive_opinions, negative_opinions, summary, analyzed_count)
+    VALUES (?, ?, ?, ?, ?)
+    ''', (product_name, positive, negative, summary, analyzed_count))
    
     conn.commit()
 
 # 데이터베이스에서 분석 결과 가져오기
 def get_analysis_result(cursor, product_name):
     cursor.execute("""
-    SELECT positive_opinions, negative_opinions, summary
+    SELECT positive_opinions, negative_opinions, summary, analyzed_count
     FROM analysis_results
     WHERE product_name = ?
     """, (product_name,))
    
     return cursor.fetchone()
 
-# ChatGPT API를 사용한 리뷰 분석 함수
-def analyze_reviews(api_key, reviews_text, product_name):
+# ChatGPT API를 사용한 리뷰 분석 함수 - 개선된 버전
+def analyze_reviews(api_key, reviews_text, product_name, review_count):
     if not api_key:
         st.error("OpenAI API 키가 필요합니다.")
-        return None, None, None
+        return None, None, None, 0
    
     try:
         # OpenAI 모듈 가져오기
@@ -180,19 +181,20 @@ def analyze_reviews(api_key, reviews_text, product_name):
         # API 키 설정
         openai.api_key = api_key
        
-        # 리뷰 텍스트가 너무 긴 경우 줄이기
-        max_chars = 15000
+        # 리뷰 텍스트가 너무 긴 경우 줄이기 - 최대 문자 수 증가
+        max_chars = 30000  # 15000에서 30000으로 증가
         if len(reviews_text) > max_chars:
             st.warning(f"리뷰 텍스트가 너무 깁니다. 처음 {max_chars} 문자만 분석합니다.")
             reviews_text = reviews_text[:max_chars] + "... (이하 생략)"
        
-        # 리뷰 분석을 위한 프롬프트
+        # 리뷰 분석을 위한 프롬프트 - 리뷰 수 정보 추가
         prompt = f"""
-다음은 '{product_name}'에 대한 네이버 블로그 포스트입니다. 이 내용을 분석하여 아래 세 가지 결과를 제공해주세요:
+다음은 '{product_name}'에 대한 네이버 블로그 포스트 {review_count}개입니다. 이 내용을 분석하여 아래 세 가지 결과를 제공해주세요:
 1. 긍정적 의견 (5-7줄로 요약)
 2. 부정적 의견 (5-7줄로 요약)
 3. 전체 요약 및 총평 (5-7줄로 요약)
 
+분석에 포함된 포스트 수: {review_count}개
 블로그 내용:
 {reviews_text}
 
@@ -204,24 +206,24 @@ def analyze_reviews(api_key, reviews_text, product_name):
 }}
 """
 
-        # API 호출
+        # API 호출 - temperature 증가로 다양성 향상
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "당신은 제품 리뷰를 분석하는 전문가입니다. 제공된 네이버 블로그 포스트를 기반으로 긍정적 의견, 부정적 의견, 전체 요약을 명확하게 요약합니다."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.2,
+            temperature=0.5,  # 0.2에서 0.5로 증가
             max_tokens=1000
         )
        
         # 결과 파싱
         result = json.loads(response.choices[0].message.content)
-        return result["positive"], result["negative"], result["summary"]
+        return result["positive"], result["negative"], result["summary"], review_count
    
     except Exception as e:
         st.error(f"ChatGPT API 호출 중 오류 발생: {str(e)}")
-        return None, None, None
+        return None, None, None, 0
 
 # 메인 애플리케이션 함수
 def main():
@@ -309,7 +311,6 @@ def main():
                     display_cols = ['title', 'description', 'postdate', 'bloggername']
                     display_cols = [col for col in display_cols if col in df.columns]
                    
-                    # 수정된 부분: use_column_width 대신 use_container_width 사용
                     st.dataframe(df[display_cols], use_container_width=True)
                 else:
                     st.error("검색 결과가 없거나 오류가 발생했습니다.")
@@ -327,10 +328,12 @@ def main():
                
                 if existing_analysis:
                     # 기존 분석 결과 표시
-                    positive, negative, summary = existing_analysis
+                    positive, negative, summary, analyzed_count = existing_analysis
                    
                     # 분석 결과 표시
                     st.subheader("기존 분석 결과")
+                    st.info(f"분석에 사용된 블로그 포스트 수: {analyzed_count}개")
+                    
                     col1, col2 = st.columns(2)
                    
                     with col1:
@@ -353,7 +356,7 @@ def main():
                
                 with st.spinner("리뷰 데이터 분석 중..."):
                     # DB에서 블로그 포스트 가져오기
-                    blog_posts = get_blog_posts(cursor, product_name)
+                    blog_posts = get_blog_posts(cursor, product_name, count)  # count 파라미터 추가하여 검색된 전체 개수 가져오기
                    
                     if blog_posts:
                         # 모든 블로그 포스트 내용 결합
@@ -362,15 +365,22 @@ def main():
                             for post in blog_posts
                         ])
                        
-                        # ChatGPT로 리뷰 분석
-                        positive, negative, summary = analyze_reviews(openai_api_key, all_posts_text, product_name)
+                        # ChatGPT로 리뷰 분석 - 리뷰 개수 전달
+                        positive, negative, summary, analyzed_count = analyze_reviews(
+                            openai_api_key, 
+                            all_posts_text, 
+                            product_name,
+                            len(blog_posts)  # 실제 분석된 리뷰 수 전달
+                        )
                        
                         if positive and negative and summary:
-                            # 분석 결과 DB에 저장
-                            save_analysis_result(conn, cursor, product_name, positive, negative, summary)
+                            # 분석 결과 DB에 저장 - 분석된 리뷰 수 저장
+                            save_analysis_result(conn, cursor, product_name, positive, negative, summary, analyzed_count)
                            
                             # 분석 결과 표시
                             st.subheader("리뷰 분석 결과")
+                            st.info(f"분석에 사용된 블로그 포스트 수: {analyzed_count}개")
+                            
                             col1, col2 = st.columns(2)
                            
                             with col1:
