@@ -10,7 +10,7 @@ import os
 
 # 페이지 설정
 st.set_page_config(
-    page_title="네이버 블로그 리뷰 분석 시스템",
+    page_title="찐 리뷰 확인하고 쿠팡에서 구매하기",
     page_icon="📊",
     layout="wide"
 )
