@@ -1,19 +1,11 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import urllib.request
-import urllib.parse
-import json
-import pandas as pd
+import urllib.request, urllib.parse, json, pandas as pd
+import sqlite3, os
 from datetime import datetime
-import sqlite3
-import os
 
 # 페이지 설정
-st.set_page_config(
-    page_title="네이버 블로그 리뷰 분석 시스템",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="네이버 블로그 리뷰 분석 시스템", page_icon="📊", layout="wide")
 
 # NaverApiClient 클래스 정의
 class NaverApiClient:
@@ -22,202 +14,135 @@ class NaverApiClient:
         self.client_secret = client_secret
         self.base_url = "https://openapi.naver.com/v1/search/"
    
-    def get_data(self, media, count, query, start=1, sort="date"):
-        """
-        네이버 API에서 데이터를 가져오는 메소드
-        """
+    def get_blog(self, query, count=10, start=1, sort="date"):
         encText = urllib.parse.quote(query)
-        url = f"{self.base_url}{media}?sort={sort}&display={count}&start={start}&query={encText}"
-       
+        url = f"{self.base_url}blog?sort={sort}&display={count}&start={start}&query={encText}"
         request = urllib.request.Request(url)
         request.add_header("X-Naver-Client-Id", self.client_id)
         request.add_header("X-Naver-Client-Secret", self.client_secret)
        
         try:
             response = urllib.request.urlopen(request)
-            rescode = response.getcode()
-           
-            if(rescode==200):
-                response_body = response.read()
-                result = response_body.decode('utf-8')
-                return result
+            if response.getcode() == 200:
+                return json.loads(response.read().decode('utf-8'))
             else:
-                st.error(f"Error Code: {rescode}")
+                st.error(f"Error Code: {response.getcode()}")
                 return None
         except Exception as e:
-            st.error(f"Exception occurred: {e}")
+            st.error(f"오류 발생: {e}")
             return None
-   
-    def get_blog(self, query, count=10, start=1, sort="date"):
-        """블로그 검색 결과를 가져오는 편의 메소드"""
-        return self.get_data("blog", count, query, start, sort)
-   
-    def parse_json(self, data):
-        """API 응답을 JSON으로 파싱하는 메소드"""
-        if data:
-            return json.loads(data)
-        return None
 
 # 데이터베이스 초기화 및 연결 함수
 def init_db():
-    # 데이터베이스 디렉토리 확인 및 생성
     db_dir = os.path.join(os.getcwd(), "data")
-    if not os.path.exists(db_dir):
-        os.makedirs(db_dir)
-   
+    if not os.path.exists(db_dir): os.makedirs(db_dir)
     db_path = os.path.join(db_dir, "reviews.db")
-   
-    # 데이터베이스 연결
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-   
-    # 테이블 생성 (없는 경우)
+    
+    # 테이블 생성
     c.execute('''
     CREATE TABLE IF NOT EXISTS blog_posts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_name TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT,
-        link TEXT,
-        blogger_name TEXT,
-        post_date TEXT,
+        id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT NOT NULL,
+        title TEXT NOT NULL, description TEXT, link TEXT,
+        blogger_name TEXT, post_date TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-   
-    # 분석 결과 테이블 생성 - 분석된 리뷰 수 필드 추가
+    )''')
+    
     c.execute('''
     CREATE TABLE IF NOT EXISTS analysis_results (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_name TEXT NOT NULL,
-        positive_opinions TEXT,
-        negative_opinions TEXT,
-        summary TEXT,
+        id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT NOT NULL,
+        positive_opinions TEXT, negative_opinions TEXT, summary TEXT,
         analyzed_count INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
+    )''')
    
     conn.commit()
     return conn, c
 
-# 블로그 데이터를 DB에 저장하는 함수
+# 블로그 데이터 저장
 def save_blog_data_to_db(conn, cursor, blog_data, product_name):
     if not blog_data or "items" not in blog_data or not blog_data["items"]:
         st.warning("처리할 블로그 데이터가 없습니다.")
         return 0
    
-    # 기존 데이터 삭제 (같은 제품명으로 검색한 경우)
     cursor.execute("DELETE FROM blog_posts WHERE product_name = ?", (product_name,))
-   
-    # 새 데이터 삽입
     count = 0
+    
     for item in blog_data["items"]:
-        # HTML 태그 제거
         title = item["title"].replace("<b>", "").replace("</b>", "").replace("&quot;", '"')
-        description = item["description"].replace("<b>", "").replace("</b>", "").replace("&quot;", '"')
+        desc = item["description"].replace("<b>", "").replace("</b>", "").replace("&quot;", '"')
        
-        cursor.execute('''
-        INSERT INTO blog_posts (product_name, title, description, link, blogger_name, post_date)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            product_name,
-            title,
-            description,
-            item.get("link", ""),
-            item.get("bloggername", ""),
-            item.get("postdate", "")
-        ))
+        cursor.execute(
+            'INSERT INTO blog_posts (product_name, title, description, link, blogger_name, post_date) VALUES (?, ?, ?, ?, ?, ?)',
+            (product_name, title, desc, item.get("link", ""), item.get("bloggername", ""), item.get("postdate", ""))
+        )
         count += 1
    
     conn.commit()
     st.success(f"{count}개의 블로그 포스트가 데이터베이스에 저장되었습니다.")
     return count
 
-# 데이터베이스에서 블로그 포스트 가져오기
+# 데이터베이스 조회 함수들
 def get_blog_posts(cursor, product_name, limit=50):
-    cursor.execute("""
-    SELECT title, description, blogger_name, post_date, link
-    FROM blog_posts
-    WHERE product_name = ?
-    LIMIT ?
-    """, (product_name, limit))
-   
+    cursor.execute(
+        "SELECT title, description, blogger_name, post_date, link FROM blog_posts WHERE product_name = ? LIMIT ?", 
+        (product_name, limit)
+    )
     return cursor.fetchall()
 
-# 분석 결과를 데이터베이스에 저장 - 분석된 리뷰 수 저장 추가
 def save_analysis_result(conn, cursor, product_name, positive, negative, summary, analyzed_count):
-    # 기존 분석 삭제 (같은 제품명인 경우)
     cursor.execute("DELETE FROM analysis_results WHERE product_name = ?", (product_name,))
-   
-    # 새 분석 결과 저장
-    cursor.execute('''
-    INSERT INTO analysis_results (product_name, positive_opinions, negative_opinions, summary, analyzed_count)
-    VALUES (?, ?, ?, ?, ?)
-    ''', (product_name, positive, negative, summary, analyzed_count))
-   
+    cursor.execute(
+        'INSERT INTO analysis_results (product_name, positive_opinions, negative_opinions, summary, analyzed_count) VALUES (?, ?, ?, ?, ?)',
+        (product_name, positive, negative, summary, analyzed_count)
+    )
     conn.commit()
 
-# 데이터베이스에서 분석 결과 가져오기
 def get_analysis_result(cursor, product_name):
-    cursor.execute("""
-    SELECT positive_opinions, negative_opinions, summary, analyzed_count
-    FROM analysis_results
-    WHERE product_name = ?
-    """, (product_name,))
-   
+    cursor.execute(
+        "SELECT positive_opinions, negative_opinions, summary, analyzed_count FROM analysis_results WHERE product_name = ?", 
+        (product_name,)
+    )
     return cursor.fetchone()
 
-# ChatGPT API를 사용한 리뷰 분석 함수 - 개선된 버전
+# ChatGPT API를 사용한 리뷰 분석 함수
 def analyze_reviews(api_key, reviews_text, product_name, review_count):
     if not api_key:
         st.error("OpenAI API 키가 필요합니다.")
         return None, None, None, 0
    
     try:
-        # OpenAI 모듈 가져오기
         import openai
-       
-        # API 키 설정
         openai.api_key = api_key
        
-        # 리뷰 텍스트가 너무 긴 경우 줄이기 - 최대 문자 수 증가
-        max_chars = 30000  # 15000에서 30000으로 증가
+        # 텍스트 길이 제한 (토큰 초과 방지)
+        max_chars = 8000  # 토큰 제한 문제를 방지하기 위해 더 작은 값으로 설정
         if len(reviews_text) > max_chars:
             st.warning(f"리뷰 텍스트가 너무 깁니다. 처음 {max_chars} 문자만 분석합니다.")
             reviews_text = reviews_text[:max_chars] + "... (이하 생략)"
        
-        # 리뷰 분석을 위한 프롬프트 - 리뷰 수 정보 추가
-        prompt = f"""
-다음은 '{product_name}'에 대한 네이버 블로그 포스트 {review_count}개입니다. 이 내용을 분석하여 아래 세 가지 결과를 제공해주세요:
-1. 긍정적 의견 (5-7줄로 요약)
-2. 부정적 의견 (5-7줄로 요약)
-3. 전체 요약 및 총평 (5-7줄로 요약)
+        # 프롬프트 간소화
+        prompt = f"""{product_name}에 대한 네이버 블로그 포스트 {review_count}개 분석:
+1. 긍정적 의견 (5-7줄)
+2. 부정적 의견 (5-7줄)
+3. 전체 요약 (5-7줄)
 
-분석에 포함된 포스트 수: {review_count}개
-블로그 내용:
-{reviews_text}
+블로그 내용: {reviews_text}
 
-응답은 JSON 형식으로 제공해주세요:
-{{
-  "positive": "긍정적 의견 요약",
-  "negative": "부정적 의견 요약",
-  "summary": "전체 요약 및 총평"
-}}
-"""
+JSON 형식으로 응답: {{"positive": "긍정 요약", "negative": "부정 요약", "summary": "전체 요약"}}"""
 
-        # API 호출 - temperature 증가로 다양성 향상
+        # API 호출
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "당신은 제품 리뷰를 분석하는 전문가입니다. 제공된 네이버 블로그 포스트를 기반으로 긍정적 의견, 부정적 의견, 전체 요약을 명확하게 요약합니다."},
+                {"role": "system", "content": "제품 리뷰 분석 전문가로서 긍정/부정 의견과 전체 요약을 제공합니다."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.5,  # 0.2에서 0.5로 증가
-            max_tokens=1000
+            temperature=0.5,
+            max_tokens=800
         )
        
-        # 결과 파싱
         result = json.loads(response.choices[0].message.content)
         return result["positive"], result["negative"], result["summary"], review_count
    
@@ -233,24 +158,19 @@ def main():
     # 사이드바 설정
     with st.sidebar:
         st.header("API 설정")
-       
+        
         # 네이버 API 설정
         st.subheader("네이버 검색 API")
         naver_client_id = st.text_input("Naver Client ID", value="9XhhxLV1IzDpTZagoBr1")
         naver_client_secret = st.text_input("Naver Client Secret", value="J14HFxv3B6", type="password")
-       
+        
         # OpenAI API 설정
         st.subheader("OpenAI API")
         openai_api_key = st.text_input("OpenAI API 키", type="password")
-       
-        st.markdown("---")
-       
+        
         # 데이터베이스 초기화 버튼
         st.subheader("데이터베이스 설정")
-        reset_db_button = st.button("데이터베이스 초기화")
-       
-        if reset_db_button:
-            # 데이터베이스 파일 삭제
+        if st.button("데이터베이스 초기화"):
             db_path = os.path.join(os.getcwd(), "data", "reviews.db")
             if os.path.exists(db_path):
                 os.remove(db_path)
@@ -258,142 +178,117 @@ def main():
    
     # 데이터베이스 연결
     conn, cursor = init_db()
-   
-    # 네이버 API 클라이언트 생성
     naver_client = NaverApiClient(naver_client_id, naver_client_secret)
    
-    # 제품명 입력 및 검색 설정
+    # 제품 검색 및 분석 UI
     st.subheader("제품 검색 및 분석")
-   
     product_name = st.text_input("제품명 입력", "")
    
     col1, col2 = st.columns(2)
-   
     with col1:
         count = st.slider("검색 결과 수", min_value=10, max_value=100, value=50)
-   
     with col2:
-        sort_options = st.selectbox(
-            "정렬",
-            options=[("최신순", "date"), ("정확도순", "sim")],
-            format_func=lambda x: x[0]
-        )
+        sort_options = st.selectbox("정렬", options=[("최신순", "date"), ("정확도순", "sim")], format_func=lambda x: x[0])
         sort_option = sort_options[1]
    
     # 검색 버튼
-    search_button = st.button("검색", type="primary")
-   
-    if search_button and product_name:
+    if st.button("검색", type="primary") and product_name:
         if not naver_client_id or not naver_client_secret:
             st.error("네이버 API 키가 필요합니다.")
         else:
             with st.spinner(f"'{product_name}'에 대한 네이버 블로그 검색 중..."):
                 # 네이버 블로그 검색
-                data = naver_client.get_blog(product_name, count, sort=sort_option)
-                parsed_data = naver_client.parse_json(data)
-               
+                parsed_data = naver_client.get_blog(product_name, count, sort=sort_option)
+                
                 if parsed_data and "items" in parsed_data and parsed_data["items"]:
                     # 블로그 데이터를 DB에 저장
                     save_blog_data_to_db(conn, cursor, parsed_data, product_name)
-                   
+                    
                     # 검색 결과 표시
                     st.subheader(f"검색 결과 (총 {parsed_data['total']}개 중 {len(parsed_data['items'])}개 표시)")
-                   
+                    
                     # 결과를 데이터프레임으로 표시
                     df = pd.DataFrame(parsed_data["items"])
-                   
+                    
                     # HTML 태그 제거
                     for col in ['title', 'description']:
                         if col in df.columns:
                             df[col] = df[col].str.replace('<b>', '').str.replace('</b>', '').str.replace('&quot;', '"')
-                   
+                    
                     # 필요한 열만 선택하여 표시
                     display_cols = ['title', 'description', 'postdate', 'bloggername']
                     display_cols = [col for col in display_cols if col in df.columns]
-                   
+                    
                     st.dataframe(df[display_cols], use_container_width=True)
                 else:
                     st.error("검색 결과가 없거나 오류가 발생했습니다.")
    
     # 분석 버튼
-    if product_name:
-        analyze_button = st.button("리뷰 분석")
-       
-        if analyze_button:
-            if not openai_api_key:
-                st.error("OpenAI API 키가 필요합니다.")
+    if product_name and st.button("리뷰 분석"):
+        if not openai_api_key:
+            st.error("OpenAI API 키가 필요합니다.")
+        else:
+            # 기존 분석 결과 확인
+            existing_analysis = get_analysis_result(cursor, product_name)
+            
+            if existing_analysis and not st.session_state.get("reanalyze", False):
+                # 기존 분석 결과 표시
+                positive, negative, summary, analyzed_count = existing_analysis
+                
+                st.subheader("기존 분석 결과")
+                st.info(f"분석에 사용된 블로그 포스트 수: {analyzed_count}개")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("### 👍 긍정적 의견")
+                    st.markdown(positive)
+                with col2:
+                    st.markdown("### 👎 부정적 의견")
+                    st.markdown(negative)
+                
+                st.markdown("### 📋 전체 요약 및 총평")
+                st.markdown(summary)
+                
+                # 재분석 옵션
+                if st.button("재분석 실행"):
+                    st.session_state.reanalyze = True
+                    st.experimental_rerun()
             else:
-                # 먼저 기존 분석 결과가 있는지 확인
-                existing_analysis = get_analysis_result(cursor, product_name)
-               
-                if existing_analysis:
-                    # 기존 분석 결과 표시
-                    positive, negative, summary, analyzed_count = existing_analysis
-                   
-                    # 분석 결과 표시
-                    st.subheader("기존 분석 결과")
-                    st.info(f"분석에 사용된 블로그 포스트 수: {analyzed_count}개")
-                    
-                    col1, col2 = st.columns(2)
-                   
-                    with col1:
-                        st.markdown("### 👍 긍정적 의견")
-                        st.markdown(positive)
-                   
-                    with col2:
-                        st.markdown("### 👎 부정적 의견")
-                        st.markdown(negative)
-                   
-                    st.markdown("### 📋 전체 요약 및 총평")
-                    st.markdown(summary)
-                   
-                    # 재분석 옵션
-                    if st.button("재분석 실행"):
-                        st.session_state.reanalyze = True
-                   
-                    if not st.session_state.get("reanalyze", False):
-                        return
-               
                 with st.spinner("리뷰 데이터 분석 중..."):
                     # DB에서 블로그 포스트 가져오기
-                    blog_posts = get_blog_posts(cursor, product_name, count)  # count 파라미터 추가하여 검색된 전체 개수 가져오기
-                   
+                    blog_posts = get_blog_posts(cursor, product_name, count)
+                    
                     if blog_posts:
-                        # 모든 블로그 포스트 내용 결합
+                        # 모든 블로그 포스트 내용 결합 (간소화된 형식)
                         all_posts_text = "\n\n".join([
-                            f"제목: {post[0]}\n내용: {post[1]}\n작성자: {post[2]}\n날짜: {post[3]}"
+                            f"제목: {post[0]}\n내용: {post[1]}"
                             for post in blog_posts
                         ])
-                       
-                        # ChatGPT로 리뷰 분석 - 리뷰 개수 전달
+                        
+                        # ChatGPT로 리뷰 분석
                         positive, negative, summary, analyzed_count = analyze_reviews(
-                            openai_api_key, 
-                            all_posts_text, 
-                            product_name,
-                            len(blog_posts)  # 실제 분석된 리뷰 수 전달
+                            openai_api_key, all_posts_text, product_name, len(blog_posts)
                         )
-                       
+                        
                         if positive and negative and summary:
-                            # 분석 결과 DB에 저장 - 분석된 리뷰 수 저장
+                            # 분석 결과 DB에 저장
                             save_analysis_result(conn, cursor, product_name, positive, negative, summary, analyzed_count)
-                           
+                            
                             # 분석 결과 표시
                             st.subheader("리뷰 분석 결과")
                             st.info(f"분석에 사용된 블로그 포스트 수: {analyzed_count}개")
                             
                             col1, col2 = st.columns(2)
-                           
                             with col1:
                                 st.markdown("### 👍 긍정적 의견")
                                 st.markdown(positive)
-                           
                             with col2:
                                 st.markdown("### 👎 부정적 의견")
                                 st.markdown(negative)
-                           
+                            
                             st.markdown("### 📋 전체 요약 및 총평")
                             st.markdown(summary)
-                           
+                            
                             # 세션 상태 초기화
                             st.session_state.reanalyze = False
                         else:
