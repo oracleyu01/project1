@@ -394,6 +394,14 @@ def main():
     # 데이터베이스 연결 종료
     conn.close()
 
+ # 페이지 하단에 광고 배너 추가
+    st.markdown("""
+    <div class="ad-banner">
+        <a href="https://www.coupang.com/vp/products/6661512526?itemId=21474551956&vendorItemId=88528821581&q=%EB%83%89%EB%8F%99%EA%B9%80%EB%B0%A5&itemsCount=36&searchId=804e976b9307816&rank=1&searchRank=1&isAddedCart=" target="_blank">
+            <img src="https://via.placeholder.com/728x90?text=광고+배너+영역" alt="Advertisement Banner" style="max-width:100%;">
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # 애플리케이션 실행
