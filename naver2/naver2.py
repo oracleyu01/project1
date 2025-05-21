@@ -183,7 +183,7 @@ def main():
                     
                     # 파일 내보내기 (타임스탬프 생성)
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    base_filename = f"naver_{search_type}_{query}_{timestamp}"
+                    base_filename = f"naver_{timestamp}"
 
                     # 버튼을 나란히 배치하기 위한 컬럼 생성
                     col_export1, col_export2 = st.columns(2)
