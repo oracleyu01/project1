@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+python# -*- coding: utf-8 -*-
 import streamlit as st
 import urllib.request
 import urllib.parse
@@ -7,10 +7,13 @@ import pandas as pd
 from datetime import datetime
 import sqlite3
 import os
+# dotenv 모듈 추가
+from dotenv import load_dotenv
 # 필요한 import 추가
 from langchain.llms import OpenAI
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
+
 
 
 # .env 파일 로드
@@ -267,6 +270,10 @@ def analyze_reviews(api_key, reviews_text, product_name):
 
 # 메인 애플리케이션 함수
 def main():
+    # 세션 상태 초기화 - main 함수 내부로 이동
+    if "reanalyze" not in st.session_state:
+        st.session_state.reanalyze = False
+        
     st.title("네이버 블로그 제품 리뷰 분석 시스템")
     st.markdown("---")
    
