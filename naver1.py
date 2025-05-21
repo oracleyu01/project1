@@ -206,7 +206,7 @@ def analyze_reviews(api_key, reviews_text, product_name):
 
         # API 호출
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "당신은 제품 리뷰를 분석하는 전문가입니다. 제공된 네이버 블로그 포스트를 기반으로 긍정적 의견, 부정적 의견, 전체 요약을 명확하게 요약합니다."},
                 {"role": "user", "content": prompt}
