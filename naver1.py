@@ -10,7 +10,7 @@ import os
 
 # 페이지 설정
 st.set_page_config(
-    page_title="찐 리뷰 확인하고 쿠팡에서 구매하기",
+    page_title="네이버 블로그 리뷰 분석 시스템",
     page_icon="📊",
     layout="wide"
 )
@@ -211,7 +211,7 @@ def analyze_reviews(api_key, reviews_text, product_name):
                 {"role": "system", "content": "당신은 제품 리뷰를 분석하는 전문가입니다. 제공된 네이버 블로그 포스트를 기반으로 긍정적 의견, 부정적 의견, 전체 요약을 명확하게 요약합니다."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.4,
+            temperature=0.2,
             max_tokens=1000
         )
        
@@ -393,13 +393,6 @@ def main():
    
     # 데이터베이스 연결 종료
     conn.close()
-
- # 페이지 하단에 광고 배너 추가
-# 페이지 하단에 광고 배너 추가 코드만 제공
-# main() 함수 끝부분에 다음 코드를 추가하세요
-
-# 페이지 하단에 광고 배너 추가
-
 
 # 애플리케이션 실행
 if __name__ == "__main__":
