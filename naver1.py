@@ -12,11 +12,9 @@ from langchain.llms import OpenAI
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 
-# 기본 설정
-os.environ["LANGSMITH_TRACING_V2"] = "true"  # 추적 활성화
-os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"  # 엔드포인트
-os.environ["LANGSMITH_API_KEY"] = "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"  # 발급받은 API 키 입력
-os.environ["LANGSMITH_PROJECT"] = "naver_shopping_ai"  # 프로젝트 이름 (설정하지 않으면 "default"로 지정됨)
+
+# .env 파일 로드
+load_dotenv()
 
 # 페이지 설정
 st.set_page_config(
